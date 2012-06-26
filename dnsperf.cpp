@@ -32,6 +32,8 @@
 
 #include <iostream>
 #include <iomanip>
+#include <getopt.h>
+
 
 #include <mysql++.h>
 #include <time.h>
@@ -39,8 +41,51 @@
 
 using namespace std;
 
+char * dnsperf_hostname = NULL;
+uint8_t dnsperf_resetdb = 0;
 int dnsperf_initdb(void);
 unsigned long resolve(const char *domainname, const char *domaintoquery);
+
+int parse_cmdline(int argc, char **argv)
+{
+	int aflag = 0;
+	int bflag = 0;
+	char *cvalue = NULL;
+	int index;
+	int c;
+
+	opterr = 0;
+
+	while ((c = getopt(argc, argv, "rh:")) != -1)
+		switch (c) {
+		case 'r':
+			dnsperf_resetdb = 1;
+			break;
+		case 'h':
+			dnsperf_hostname = strdup(optarg);
+			break;
+		case '?':
+			if (optopt == 'h')
+				fprintf(stderr,
+					"Option -%c requires an argument.\n",
+					optopt);
+			else if (isprint(optopt))
+				fprintf(stderr, "Unknown option `-%c'.\n",
+					optopt);
+			else
+				fprintf(stderr,
+					"Unknown option character `\\x%x'.\n",
+					optopt);
+			return 1;
+		default:
+			abort();
+		}
+
+	return 0;
+}
+
+
+
 int main(int argc, char *argv[])
 {
 	unsigned long timevalue;
@@ -51,10 +96,15 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 #endif
-
-	if (dnsperf_initdb()) {
-		cout << "Database init failed, exiting" << endl;
+	if (parse_cmdline(argc, argv)) {
+		cout << "Error parsing arguments" << endl;
 		exit(1);
+	}
+	if (dnsperf_resetdb) {
+		if (dnsperf_initdb()) {
+			cout << "Database init failed, exiting" << endl;
+			exit(1);
+		}
 	}
 	// Connect to the sample database.
 	mysqlpp::Connection conn((bool) false);
@@ -89,7 +139,7 @@ int main(int argc, char *argv[])
 		for (i = 0; i < res_domains.num_rows(); i++) {
 
 			timevalue =
-			    resolve(res_domains[i]["domain"].c_str(), argv[1]);
+			    resolve(res_domains[i]["domain"].c_str(), dnsperf_hostname);
 			//gettimeofday(&currenttime,NULL);
 
 			try {
@@ -166,10 +216,9 @@ int main(int argc, char *argv[])
 	}
 }
 
-#if 1
 unsigned long resolve(const char *domainname, const char *domaintoquery)
 {
-	ldns_resolver *res, *actual_res;	//, *actual_res2;
+	ldns_resolver *res, *actual_res;
 	ldns_rdf *domain, *domaintoq;
 	ldns_pkt *p;
 	ldns_rdf *ns_name, *ns_ip, **ns_iplist;
@@ -177,26 +226,23 @@ unsigned long resolve(const char *domainname, const char *domaintoquery)
 	ldns_rr_list *iplist;
 	ldns_status s;
 	timeval t1, t2;
-	unsigned long s1, s2;
+	unsigned long us1, us2;
 	int i;
 
 	p = NULL;
 	query_results = NULL;
 	res = NULL;
+
 	domain = ldns_dname_new_frm_str(domainname);
 	if (!domain) {
 		exit(EXIT_FAILURE);
 	}
+
 	domaintoq = ldns_dname_new_frm_str(domaintoquery);
 	if (!domaintoq) {
 		exit(EXIT_FAILURE);
 	}
-#if 0
-	actual_res2 = ldns_resolver_new();
-	if (!actual_res2) {
-		exit(EXIT_FAILURE);
-	}
-#endif
+
 	actual_res = ldns_resolver_new();
 	if (!actual_res) {
 		exit(EXIT_FAILURE);
@@ -238,22 +284,9 @@ unsigned long resolve(const char *domainname, const char *domaintoquery)
 								    iplist);
 
 		}
-#if 0
-		ns_iplist = ldns_resolver_nameservers(actual_res);
-		for (i = 0; i < ldns_resolver_nameserver_count(actual_res); i++) {
-			ns_ip = ldns_resolver_pop_nameserver(actual_res);
-			//ldns_rdf_print(stdout, ns_ip);
-			//printf("\n");
-			ldns_resolver_push_nameserver(actual_res2, ns_ip);
-		}
 
-#endif
 		ldns_resolver_nameservers_randomize(actual_res);
 		ldns_rr_list_deep_free(iplist);
-
-		//ldns_rr_list_sort(query_results);
-		//ldns_rr_list_print(stdout, query_results);
-		//ldns_rr_list_deep_free(query_results);
 	}
 
 	ldns_pkt_free(p);
@@ -279,19 +312,17 @@ unsigned long resolve(const char *domainname, const char *domaintoquery)
 			printf("Cannot resolve %s\n", domaintoquery);
 		}
 #endif
-		s1 = t2.tv_sec * 1000.0 + (t2.tv_usec / 1000.0) -
-		    (t1.tv_sec * 1000.0 + (t1.tv_usec / 1000.0));
+		us1 = t2.tv_sec * 1000000 + (t2.tv_usec) -
+		    (t1.tv_sec * 1000000 + (t1.tv_usec));
 //              printf("%lu us elapsed\n", s1);
 
 	}
 	ldns_pkt_free(p);
 	ldns_resolver_deep_free(actual_res);
-	//       ldns_resolver_deep_free(actual_res2);
 #endif
 
-	return s1;
+	return us1;
 }
-#endif
 
 int dnsperf_initdb(void)
 {
