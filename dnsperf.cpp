@@ -231,6 +231,8 @@ int main(int argc, char *argv[])
 					}
 					timevalue =
 					    resolve(dnsperf_hostname, resolver);
+					if (!timevalue)
+						continue;
 					ldns_resolver_free(resolver);
 
 					try {
@@ -367,6 +369,7 @@ ldns_resolver *build_resolver(const char *domainname,
 
 	domain = ldns_dname_new_frm_str(domainname);
 	if (!domain) {
+		cout << "failed to build domain to query for NS" << endl;
 		exit(EXIT_FAILURE);
 	}
 
@@ -374,6 +377,7 @@ ldns_resolver *build_resolver(const char *domainname,
 	s = ldns_resolver_new_frm_file(&res, NULL);
 
 	if (s != LDNS_STATUS_OK) {
+		cout << "failed to build resolver from file" << endl;
 		exit(EXIT_FAILURE);
 	}
 
@@ -384,6 +388,7 @@ ldns_resolver *build_resolver(const char *domainname,
 	ldns_rdf_deep_free(domain);
 
 	if (!p) {
+		cout << "failed to query for nameservers" << endl;
 		exit(EXIT_FAILURE);
 	} else {
 		*query_results = ldns_pkt_rr_list_by_type(p,
@@ -412,6 +417,7 @@ unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res)
 
 	domaintoq = ldns_dname_new_frm_str(domaintoquery);
 	if (!domaintoq) {
+		cout << "failed to build domain to query" << endl;
 		exit(EXIT_FAILURE);
 	}
 
@@ -424,7 +430,9 @@ unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res)
 	ldns_rdf_deep_free(domaintoq);
 
 	if (!p) {
-		exit(EXIT_FAILURE);
+		cout << "failed to query for the domain" << endl;
+		//exit(EXIT_FAILURE);
+		return 0;
 	} else {
 		query_results = ldns_pkt_rr_list_by_type(p,
 							 LDNS_RR_TYPE_A,
