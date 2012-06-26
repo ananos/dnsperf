@@ -115,20 +115,21 @@ int main(int argc, char *argv[])
 				query.execute(res_domains[i]["domain"].c_str(),
 					      timevalue, date);
 
-				cout << "inserted " << conn.
-				    count_rows("dnsqueries") << " rows." <<
+				cout << "inserted " <<
+				    conn.count_rows("dnsqueries") << " rows." <<
 				    endl;
 			}
 			catch(const mysqlpp::BadQuery & er) {
-				cerr << endl << "Query error: " << er.
-				    what() << endl;
+				cerr << endl << "Query error: " << er.what() <<
+				    endl;
 				return 1;
 			}
 			catch(const mysqlpp::BadConversion & er) {
-				cerr << endl << "Conversion error: " << er.
-				    what() << endl << "\tretrieved data size: "
-				    << er.retrieved << ", actual size: " << er.
-				    actual_size << endl;
+				cerr << endl << "Conversion error: " <<
+				    er.what() << endl <<
+				    "\tretrieved data size: " << er.
+				    retrieved << ", actual size: " <<
+				    er.actual_size << endl;
 				return 1;
 			}
 			catch(const mysqlpp::Exception & er) {
@@ -319,8 +320,8 @@ int dnsperf_initdb(void)
 			    con.select_db("mysql_cpp_data")) {
 				new_db = true;
 			} else {
-				cerr << "Error creating DB: " << con.
-				    error() << endl;
+				cerr << "Error creating DB: " << con.error() <<
+				    endl;
 				return 1;
 			}
 		}
@@ -371,10 +372,10 @@ int dnsperf_initdb(void)
 
 		// Test that above did what we wanted.
 		cout << "Init complete, query rows..." << endl;
-		cout << "inserted " << con.
-		    count_rows("dnsqueries") << " rows." << endl;
-		cout << "inserted " << con.
-		    count_rows("domains") << " rows." << endl;
+		cout << "inserted " << con.count_rows("dnsqueries") << " rows."
+		    << endl;
+		cout << "inserted " << con.count_rows("domains") << " rows." <<
+		    endl;
 
 		// Report success
 		cout << (new_db ? "Created" : "Reinitialized") <<
