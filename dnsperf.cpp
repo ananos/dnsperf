@@ -127,9 +127,8 @@ int main(int argc, char *argv[])
 			catch(const mysqlpp::BadConversion & er) {
 				cerr << endl << "Conversion error: " <<
 				    er.what() << endl <<
-				    "\tretrieved data size: " << er.
-				    retrieved << ", actual size: " <<
-				    er.actual_size << endl;
+				    "\tretrieved data size: " << er.retrieved <<
+				    ", actual size: " << er.actual_size << endl;
 				return 1;
 			}
 			catch(const mysqlpp::Exception & er) {
