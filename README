@@ -1,6 +1,6 @@
-+---------+
-| DNSperf |
-+---------+
+++=========++
+|| DNSperf ||
+++=========++
 
 DNSperf: a tool to track nameserver query latency.
 
@@ -33,34 +33,69 @@ b. DNS lib, us ldns:
 http://www.nlnetlabs.nl/projects/ldns/
 =======
 
-This tool is based on ldns and mysql++-doc examples. To use, follow the instructions below:
+++==============++
+|| General Info ||
+++==============++
 
-./dnsperf <options> 
-options: [-h] | [-V] | [-v] [-f <ms>] [-r] [-u <dbuser>] [-p <dbpass] 
-         [-c <dbhostname>] [-m <dbname>] [-t <logtable>] [-d <domaintable>] [-s <stattable>]
+Based on the options given on the command line, the tool queries all the
+nameservers of domains found in the domains database table. Using the MySQL++
+library, we retrieve data from the database (domains table) and store latency
+measurements, timestamps and statistical calculations to two other (the log
+query table and the stats table). The tool runs forever, looping around domains
+(outer loop) and the nameservers of each domain (inner loop). 
 
-  -h			  print this help and exit
-  -V			  print version and exit
+Prior to the actual querying, if the database does not exist, we create it and
+initialize the tables. The domains table contains the given domains (populated
+from a static array in the code). The log query table (default name:
+dnsperf_queries) keeps the domain, the actual nameserver that we query, the
+latency and the timestamp of the query. The stats table is initialized with
+NULL values, except for the domains, to ease the value update when the first
+domain is done. It contains the domain, the average latency and standard
+deviation of all queries the relevant domain up to this point in time, the
+total number of queries and the first/last timestamp of querying.
 
-  -q			  supress stat output
-  -v			  verbose output
-  -f <time>		  time to wait after each loop (in ms)
 
-  Database Specific (MySQL)
-  -r			  re-initialize database (WARNING: all existing data will be lost)
-  -u <user>		  user to connect to database (default: root)
-  -p <pass>		  pass to connect to database (default: <empty>)
-  -c <hostname>		  hostname that MySQL is running (default: localhost)
-  -m <dbname>		  MySQL database name (default: dnsperf_data)
+++=======++
+|| Usage ||
+++=======++
+
+This tool is based on ldns and mysql++-doc examples. Through the cmdline, the
+user can customize a various set of parameters: 
+- Database specific stuff: the DBMS hostname, the database name, the names of
+  the tables (-c, -m, -t, -d, -s).
+  WARNING: if -r is used, any existing tables will be dropped.
+- the time between query loops to domains (default: 1ms).
+- the degree of verbosity (-q, -v or none for standard stats reporting).
+
+
+
+ $ ./dnsperf -h
+ ./dnsperf <options>
+ options: [-h] | [-V] | [-v] [-f <ms>] [-r] [-u <dbuser>] [-p <dbpass]
+          [-c <dbhostname>] [-m <dbname>] [-t <logtable>] [-d <domaintable>]
+          [-s <stattable>]
+
+   -h			  print this help and exit
+   -V			  print version and exit
+
+   -q			  supress stat output
+   -v			  verbose output
+   -f <time>		  time to wait after each loop (in ms)
+
+   Database Specific (MySQL)
+   -r			  re-initialize database (WARNING: all existing data is lost)
+   -u <user>		  user to connect to database (default: root)
+   -p <pass>		  pass to connect to database (default: <empty>)
+   -c <hostname>	  hostname that MySQL is running (default: localhost)
+   -m <dbname>		  MySQL database name (default: dnsperf_data)
                             if it doesn't exist, we create it, implies -r
-  -t <table>		  table name for logging queries (default: dnsperf_queries)
-  -d <table>		  table name for top level domains (default: dnsperf_domains)
-  -s <table>		  table name for stats (default: dnsperf_stattable)
+   -t <table>		  table name for logging queries (default: dnsperf_queries)
+   -d <table>		  table name for top level domains (default: dnsperf_domains)
+   -s <table>		  table name for stats (default: dnsperf_stattable)
 
-
-+-----+
-|Notes|
-+-----+
+++=======++
+|| Notes ||
+++=======++
 
 We use the LDNS library to perform DNS queries. We first build a resolver using
 the host machine as a referece (meaning we use /etc/resolv.conf) to obtain all
@@ -84,9 +119,9 @@ the above calculations.
 - There are some memory leaks, probably due to improper LDNS/MySQL++ handling.
   Must investigate further.
 
-+------------------+
-|Example execution |
-+------------------+
+++==========++
+|| Examples ||
+++==========++
 
  a. Really quiet (silently populating the database):
    $ ./dnsperf -q

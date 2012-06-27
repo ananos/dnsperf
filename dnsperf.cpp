@@ -42,15 +42,21 @@
 
 using namespace std;
 
+/* Function prototypes */
+
+/* Helper functions */
 int parse_cmdline(int argc, char **argv);
 void dnsperf_usage(const char * progname);
 void dnsperf_version(void);
 int dnsperf_sanity_check(void);
 
-unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res, char * date);
+/* DNS specific */
+unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res,
+		      char *date);
 ldns_resolver *build_resolver(const char *domainname,
 			      ldns_rr_list ** query_results);
 
+/* Database specific */
 int dnsperf_stats(char *domain);
 int dnsperf_initdb(void);
 int dnsperf_create_stattable(mysqlpp::Connection *conn, const char *tablename);
@@ -297,16 +303,6 @@ int main(int argc, char *argv[])
 	if (parse_cmdline(argc, argv)) {
 		exit(1);
 	}
-
-#if 0
-	if (dnsperf_resetdb) {
-		/* Reset DB values */
-		if (dnsperf_initdb()) {
-			cout << "Database init failed, exiting" << endl;
-			exit(1);
-		}
-	}
-#endif
 
 	/* Connect to the database */
 	mysqlpp::Connection conn((bool) false);

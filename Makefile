@@ -3,7 +3,7 @@ LDNSDIR := $(HOME)/local
 LDNSINCDIR := $(LDNSDIR)/include
 LDNSLIBDIR := $(LDNSDIR)/lib
 CPPFLAGS := -I/usr/include/mysql -I/usr/include/mysql++ -I$(LDNSINCDIR)
-CPPFLAGS += -Wall -Werror
+CPPFLAGS += -Wall
 LDFLAGS := -lmysqlpp -lmysqlclient -L$(LDNSLIBDIR) -lldns
 DNSPERF := dnsperf 
 
