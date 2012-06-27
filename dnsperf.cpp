@@ -34,7 +34,7 @@
 #include <iomanip>
 #include <getopt.h>
 
-#include <mysql++.h>
+#include <mysql++/mysql++.h>
 #include <time.h>
 #include <ldns/ldns.h>
 
