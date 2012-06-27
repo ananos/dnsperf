@@ -119,6 +119,12 @@ the above calculations.
 - There are some memory leaks, probably due to improper LDNS/MySQL++ handling.
   Must investigate further.
 
+Tested with:
+- g++ version 4.4 (4.4.5), 4.6 (4.6.3)
+- libmysql++ 3.0.9, 3.1.0
+- libldns 1.6.6, 1.6.13
+
+
 ++==========++
 || Examples ||
 ++==========++
