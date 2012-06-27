@@ -70,6 +70,7 @@ int dnsperf_get_domains(mysqlpp::Connection * conn,
 int dnsperf_check_table(mysqlpp::Connection * conn, const char *tablename,
 			mysqlpp::StoreQueryResult * res);
 
+#define RELDOMLEN 7
 #define HOSTNAME_MAX 50
 /* cmdline options */
 char dnsperf_hostname[HOSTNAME_MAX];
@@ -224,13 +225,13 @@ int dnsperf_do(mysqlpp::Connection * conn,
 				    endl;
 
 			/* construct a random hostname (keeping the relevant domain name) */
-			sprintf(dnsperf_hostname, "foo%d", rand() % 1024);
+			snprintf(dnsperf_hostname, RELDOMLEN + 1, "foo%d", rand() % 1024);
 			dnsperf_randhost_idx = strlen(dnsperf_hostname);
 			if (dnsperf_verbose)
 				cout << "Relative domain to query is `" <<
 				    dnsperf_hostname << "`" << endl;
 
-			sprintf(dnsperf_hostname + dnsperf_randhost_idx, ".%s",
+			snprintf(dnsperf_hostname + dnsperf_randhost_idx, strlen(domain) + 2, ".%s",
 				domain);
 
 			/* do the actual query and measure time */
@@ -401,7 +402,7 @@ ldns_resolver *build_resolver(const char *domainname,
 							  LDNS_RR_TYPE_NS,
 							  LDNS_SECTION_ANSWER);
 		if (!(*query_results)) {
-			printf("Cannot find ns for %s\n", domainname);
+			cout << "Cannot find ns for " << domainname << endl;
 		}
 
 	}
@@ -429,6 +430,9 @@ unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res, cha
 		exit(EXIT_FAILURE);
 	}
 
+	if (dnsperf_verbose)
+		cout << "querying for `" << domaintoquery << "`" << endl;
+
 	tm = time(NULL);
 	gettimeofday(&t1, NULL);
 	p = ldns_resolver_query(actual_res,
@@ -453,12 +457,11 @@ unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res, cha
 							 LDNS_SECTION_ANSWER);
 #if 0
 		if (!query_results) {
-			printf("Cannot resolve %s\n", domaintoquery);
+			cout << "Cannot resolve " << domaintoquery << endl;
 		}
 #endif
 		us1 = t2.tv_sec * 1000000 + (t2.tv_usec) -
 		    (t1.tv_sec * 1000000 + (t1.tv_usec));
-//              printf("%lu us elapsed\n", s1);
 
 	}
 	ldns_pkt_free(p);
@@ -565,8 +568,8 @@ int dnsperf_stats(char *domain)
 			avg = res[0]["avg(latency)"];
 			stddev = res[0]["stddev(latency)"];
 			count = res[0]["count(latency)"];
-			sprintf(timestamp_first, res[0]["min(timestamp)"]);
-			sprintf(timestamp_last, res[0]["max(timestamp)"]);
+			snprintf(timestamp_first, strlen(res[0]["min(timestamp)"]) + 1 , res[0]["min(timestamp)"]);
+			snprintf(timestamp_last, strlen(res[0]["max(timestamp)"]) + 1, res[0]["max(timestamp)"]);
 			if (!dnsperf_quiet) {
 				cout << "domain: " << domain << " "
 				    << "count: " << count << " queries, "
@@ -847,7 +850,7 @@ int parse_cmdline(int argc, char **argv)
 
 void dnsperf_version(void)
 {
-	printf("Version %s\n", VERSION);
+	cout <<"Version " << VERSION << endl;
 	exit(0);
 }
 void dnsperf_usage(const char * progname)
