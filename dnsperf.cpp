@@ -476,6 +476,17 @@ int dnsperf_stats(char *domain)
 		    dnsperf_dbhostname << "/" << dnsperf_dbname << endl;
 	if (conn.connect(dnsperf_dbname, dnsperf_dbhostname, dnsperf_dbuser,
 			 dnsperf_dbpass)) {
+		
+		/* Check that the domain has answered at least one of our queries */
+		mysqlpp::Query query_check = conn.query();
+		query_check << "select *" <<
+		    " from " << dnsperf_valtable <<
+		    " where domain='" << domain << "';";
+		mysqlpp::StoreQueryResult res_check = query_check.store();
+		if (!res_check.num_rows()){
+			return 1;
+		}
+
 		/* Use mysql to calculate avg and stddev */
 		mysqlpp::Query query = conn.query();
 		query << "select " <<
