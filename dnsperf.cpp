@@ -41,10 +41,10 @@
 using namespace std;
 
 #define HOSTNAME_MAX 50
-char *dnsperf_hostname = NULL;
+char dnsperf_hostname[HOSTNAME_MAX];
 uint8_t dnsperf_resetdb = 0;
 uint8_t dnsperf_randhost_idx = 0;
-uint8_t dnsperf_dumpdb = 0;
+uint8_t dnsperf_verbose = 0;
 unsigned long dnsperf_freq = 1;
 const char *dnsperf_dbhostname = "localhost";
 const char *dnsperf_dbname = "dnsperf_data";
@@ -64,23 +64,234 @@ ldns_resolver *build_resolver(const char *domainname,
 unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res);
 
 int dnsperf_stats(char *domain);
+void dnsperf_version(void)
+{
+	printf("Version Blah\n");
+	exit(0);
+}
+void dnsperf_usage(const char * progname)
+{
+	printf("%s <options> \n", progname);
+	printf("Options: [-h] | [-V] | [-v] [-f <ms>] [-r] [-u <dbuser>] [-p <dbpass] \n"
+	       "         [-c <dbhostname>] [-m <dbname>] [-t <logtable>] [-d <domaintable>] [-s <stattable>]\n\n");
+
+	printf("  -h			  print this help and exit\n");
+	printf("  -V			  print version and exit\n\n");
+
+	printf("  -v			  verbose output\n");
+	printf("  -f <time>		  time to wait after each loop (in ms)\n\n");
+
+	printf("  Database Specific (MySQL)\n");
+	printf("  -r			  re-initialize database (WARNING: all existing data will be lost)\n");
+	printf("  -u <user>		  user to connect to database (default: root)\n");
+	printf("  -p <pass>		  pass to connect to database (default: <empty>)\n");
+	printf("  -c <hostname>		  hostname that MySQL is running (default: localhost)\n");
+	printf("  -m <dbname>		  MySQL database name (default: dnsperf_data)\n"
+	       "                            if it doesn't exist, we create it, implies -r\n");
+	printf("  -t <table>		  table name for logging queries (default: dnsperf_queries)\n");
+	printf("  -d <table>		  table name for top level domains (default: dnsperf_domains)\n");
+	printf("  -s <table>		  table name for stats (default: dnsperf_stattable)\n\n");
+
+	exit(0);
+}
+int dnsperf_check_table(mysqlpp::Connection *conn, const char *tablename, mysqlpp::StoreQueryResult *res)
+{
+	mysqlpp::Query query = conn->query();
+
+	cout << "Checking table:`" << tablename <<
+	    "`" << endl;
+	query<< "select * from %6:table";
+	query.parse();
+	query.template_defaults["table"] = tablename;
+	if (dnsperf_verbose)
+		cout << query << endl;
+	if (!(*res = query.store())) {
+		cerr << "Failed to access table `" <<
+		    tablename << "` " << query.error() << endl;
+		return 1;
+	}
+	return 0;
+}
+
+int dnsperf_create_stattable(mysqlpp::Connection *conn, const char *tablename)
+{
+
+	cout << "Creating " << tablename << " table..." << endl;
+	try {
+		mysqlpp::Query query = conn->query();
+		query<<
+		    "CREATE TABLE " << tablename << " (" <<
+		    "  domain CHAR(80) NOT NULL, " <<
+		    "  average DOUBLE NULL, " <<
+		    "  stddev DOUBLE NULL, " <<
+		    "  count BIGINT NULL, " <<
+		    "  first DATETIME NULL, " <<
+		    "  last DATETIME NULL ) " <<
+		    "ENGINE = InnoDB " <<
+		    "CHARACTER SET utf8 COLLATE utf8_general_ci";
+		query.execute();
+
+		query<< "insert into %6:table values " <<
+		    "(%0q, %1q, %2q, %3q, %4q, %5q)";
+		query.parse();
+
+		query.template_defaults["table"] = tablename;
+
+		for (size_t i = 0; i < DNSPERF_DOMAINS; ++i)
+			query.execute(default_domains[i], 0, 0, 0, 0, 0);
+	}
+	catch(const mysqlpp::BadQuery & er) {
+		cerr << endl << "Query error: " << er.what() << endl;
+		return 1;
+	}
+	catch(const mysqlpp::BadConversion & er) {
+		cerr << endl << "Conversion error: " << er.what() << endl <<
+		    "\tretrieved data size: " << er.retrieved <<
+		    ", actual size: " << er.actual_size << endl;
+		return 1;
+	}
+	catch(const mysqlpp::Exception & er) {
+		cerr << endl << "Error: " << er.what() << endl;
+		return 1;
+	}
+	return 0;
+}
+int dnsperf_create_domtable(mysqlpp::Connection *conn, const char *tablename)
+{
+	try {
+		mysqlpp::Query query = conn->query();
+
+		cout << "Creating " << tablename << " table..." <<
+		    endl;
+		query << "CREATE TABLE " << tablename << " (" <<
+		    "  rank INT NOT NULL, " << "  domain CHAR(80) NOT NULL, " <<
+		    "  notes MEDIUMTEXT NULL) " << "ENGINE = InnoDB " <<
+		    "CHARACTER SET utf8 COLLATE utf8_general_ci";
+		query.execute();
+
+		if (dnsperf_verbose)
+			cout << "Populating the " << tablename <<
+			    " table ..." << endl;
+		query << "insert into %6:table values " <<
+		    "(%0q, %1q, %4q:notes)";
+		query.parse();
+
+		query.template_defaults["table"] = tablename;
+		query.template_defaults["notes"] = mysqlpp::null;
+
+		for (size_t i = 1; i <= DNSPERF_DOMAINS; ++i)
+			query.execute(i, default_domains[i - 1]);
+	}
+	catch(const mysqlpp::BadQuery & er) {
+		cerr << endl << "Query error: " << er.what() << endl;
+		return 1;
+	}
+	catch(const mysqlpp::BadConversion & er) {
+		cerr << endl << "Conversion error: " << er.what() << endl <<
+		    "\tretrieved data size: " << er.retrieved <<
+		    ", actual size: " << er.actual_size << endl;
+		return 1;
+	}
+	catch(const mysqlpp::Exception & er) {
+		cerr << endl << "Error: " << er.what() << endl;
+		return 1;
+	}
+	return 0;
+}
+
+int dnsperf_create_valtable(mysqlpp::Connection *conn, const char *tablename)
+{
+	try {
+		cout << "Creating " << tablename << " table..." << endl;
+		mysqlpp::Query query = conn->query();
+		query <<
+		    "CREATE TABLE " << tablename << " (" <<
+		    "  domain CHAR(80) NOT NULL, " <<
+		    "  latency BIGINT NOT NULL, " <<
+		    "  timestamp DATETIME NOT NULL, " <<
+		    "  nameserver CHAR(80) NOT NULL, " <<
+		    "  notes MEDIUMTEXT NULL) " <<
+		    "ENGINE = InnoDB " <<
+		    "CHARACTER SET utf8 COLLATE utf8_general_ci";
+		query.execute();
+
+	}
+	catch(const mysqlpp::BadQuery & er) {
+		cerr << endl << "Query error: " << er.what() << endl;
+		return 1;
+	}
+	catch(const mysqlpp::BadConversion & er) {
+		cerr << endl << "Conversion error: " << er.what() << endl <<
+		    "\tretrieved data size: " << er.retrieved <<
+		    ", actual size: " << er.actual_size << endl;
+		return 1;
+	}
+	catch(const mysqlpp::Exception & er) {
+		cerr << endl << "Error: " << er.what() << endl;
+		return 1;
+	}
+	return 0;
+
+}
+int dnsperf_sanity_check(void)
+{
+	mysqlpp::Connection conn((bool) false);
+	mysqlpp::StoreQueryResult res;
+	cout << "Connecting to MYSQL://" << dnsperf_dbuser << "@" <<
+	    dnsperf_dbhostname << endl;
+	if (!conn.connect(0, dnsperf_dbhostname, dnsperf_dbuser,
+			  dnsperf_dbpass)) {
+		cerr << "DB connection failed: " << conn.error() << endl;
+		return 1;
+	}
+	cout << "Connected, DBMS active." << endl;
+
+	cout << "Selecting database: `" << dnsperf_dbname << "`" << endl;
+	if (!conn.select_db(dnsperf_dbname)) {
+		cout << "Database " << dnsperf_dbname <<
+		    " does not exist, creating it... " << endl;
+		dnsperf_initdb();
+	}
+	if (conn.select_db(dnsperf_dbname)) {
+		/* What happens if the table exists but the schema is different ? ;P */
+		if (dnsperf_check_table(&conn, dnsperf_valtable, &res)) {
+			if (dnsperf_create_valtable(&conn, dnsperf_valtable)) {
+				cout << "Unable to create table `" << dnsperf_valtable << endl;
+				return 1;
+			}
+		}
+		if (dnsperf_check_table(&conn, dnsperf_domaintable, &res)) {
+			if (dnsperf_create_domtable(&conn, dnsperf_domaintable)) {
+				cout << "Unable to create table `" << dnsperf_domaintable << endl;
+				return 1;
+			}
+		}
+		if (dnsperf_check_table(&conn, dnsperf_stattable, &res)) {
+			if (dnsperf_create_stattable(&conn, dnsperf_stattable)) {
+				cout << "Unable to create table `" << dnsperf_stattable<< endl;
+				return 1;
+			}
+		}
+	}
+	return 0;
+
+}
 int parse_cmdline(int argc, char **argv)
 {
-	int aflag = 0;
-	int bflag = 0;
-	char *cvalue = NULL;
-	int index;
 	int c;
 
 	opterr = 0;
 
-	while ((c = getopt(argc, argv, "vrh:u:p:m:c:t:d:f:")) != -1)
+	while ((c = getopt(argc, argv, "Vhvru:p:m:c:t:d:s:f:")) != -1)
 		switch (c) {
+		case 'V':
+			dnsperf_version();
+			break;
 		case 'f':
 			dnsperf_freq = strtoul(optarg, NULL, 0);
 			break;
 		case 'v':
-			dnsperf_dumpdb = 1;
+			dnsperf_verbose = 1;
 			break;
 		case 'r':
 			dnsperf_resetdb = 1;
@@ -91,8 +302,8 @@ int parse_cmdline(int argc, char **argv)
 		case 'd':
 			dnsperf_domaintable = strdup(optarg);
 			break;
-		case 'h':
-			dnsperf_hostname = strdup(optarg);
+		case 's':
+			dnsperf_stattable = strdup(optarg);
 			break;
 		case 'm':
 			dnsperf_dbname = strdup(optarg);
@@ -106,24 +317,19 @@ int parse_cmdline(int argc, char **argv)
 		case 'c':
 			dnsperf_dbhostname = strdup(optarg);
 			break;
+		case 'h':
+			dnsperf_usage(argv[0]);
+			break;
 		case '?':
-			if (optopt == 'h')
-				fprintf(stderr,
-					"Option -%c requires an argument.\n",
-					optopt);
-			else if (isprint(optopt))
-				fprintf(stderr, "Unknown option `-%c'.\n",
-					optopt);
-			else
-				fprintf(stderr,
-					"Unknown option character `\\x%x'.\n",
-					optopt);
+			cout << "Error parsing arguments" << endl;
+			dnsperf_usage(argv[0]);
 			return 1;
 		default:
 			abort();
 		}
 
-	return 0;
+	return dnsperf_sanity_check();
+	//return 0;
 }
 
 int main(int argc, char *argv[])
@@ -132,7 +338,6 @@ int main(int argc, char *argv[])
 	srand((unsigned)time(NULL));
 
 	if (parse_cmdline(argc, argv)) {
-		cout << "Error parsing arguments" << endl;
 		exit(1);
 	}
 
@@ -163,6 +368,7 @@ int main(int argc, char *argv[])
 	}
 
 	if (conn.select_db(dnsperf_dbname)) {
+		int iter = 0;
 		mysqlpp::Query query_domains = conn.query();
 		cout << "Database selected." << endl;
 
@@ -171,7 +377,7 @@ int main(int argc, char *argv[])
 		query_domains << "select * from %6:table";
 		query_domains.parse();
 		query_domains.template_defaults["table"] = dnsperf_domaintable;
-		if (dnsperf_dumpdb)
+		if (dnsperf_verbose)
 			cout << query_domains << endl;
 		mysqlpp::StoreQueryResult res_domains = query_domains.store();
 
@@ -181,7 +387,7 @@ int main(int argc, char *argv[])
 			    error() << endl;
 			return 1;
 		}
-		if (dnsperf_dumpdb) {
+		if (dnsperf_verbose) {
 			cout.setf(ios::left);
 			cout <<
 			    setw(10) << "Rank" <<
@@ -195,15 +401,6 @@ int main(int argc, char *argv[])
 			}
 		}
 
-		if (!dnsperf_hostname) {
-			cout << "Building random domain to query." << endl;
-			char *tmp = (char *)malloc(HOSTNAME_MAX);
-			snprintf(tmp, 7, "foo%d", rand() % 1024);
-			dnsperf_hostname = tmp;
-			dnsperf_randhost_idx = strlen(dnsperf_hostname);
-			cout << "Relative domain to query is `" <<
-			    dnsperf_hostname << "`" << endl;
-		}
 
 		cout << "Starting to loop..." << endl;
 		while (1) {
@@ -217,10 +414,6 @@ int main(int argc, char *argv[])
 				const char *domain =
 				    res_domains[i]["domain"].c_str();
 
-				if (dnsperf_randhost_idx)
-					sprintf(dnsperf_hostname +
-						dnsperf_randhost_idx, ".%s",
-						domain);
 
 				actual_res =
 				    build_resolver(domain, &query_results);
@@ -228,7 +421,6 @@ int main(int argc, char *argv[])
 				for (size_t j = 0;
 				     j < ldns_rr_list_rr_count(query_results);
 				     j++) {
-					ldns_rdf *ns;
 					ldns_resolver *resolver;
 					resolver = ldns_resolver_new();
 					ns_name =
@@ -248,16 +440,29 @@ int main(int argc, char *argv[])
 						    ldns_rdf2str(ns_name);
 						(nameserver) = test;
 					}
+					if (dnsperf_verbose)
+						cout << "Building random domain to query." << endl;
+					sprintf(dnsperf_hostname, "foo%d", rand() % 1024);
+					dnsperf_randhost_idx = strlen(dnsperf_hostname);
+					if (dnsperf_verbose)
+						cout << "Relative domain to query is `" <<
+						    dnsperf_hostname << "`" << endl;
+
+
+					sprintf(dnsperf_hostname + dnsperf_randhost_idx, ".%s",
+						domain);
+
 					timevalue =
 					    resolve(dnsperf_hostname, resolver);
 					if (!timevalue)
+						/* If we fail, then too bad for the domain :-) */
 						continue;
 					ldns_resolver_free(resolver);
 
 					try {
 						mysqlpp::Query query =
 						    conn.query();
-						if (dnsperf_dumpdb)
+						if (dnsperf_verbose)
 							cout <<
 							    "Updating mysql table "
 							    << dnsperf_valtable
@@ -274,7 +479,7 @@ int main(int argc, char *argv[])
 						query.template_defaults["notes"]
 						    = mysqlpp::null;
 
-						if (dnsperf_dumpdb)
+						if (dnsperf_verbose)
 							cout << "Populating " <<
 							    dnsperf_valtable <<
 							    " table..." <<
@@ -289,7 +494,7 @@ int main(int argc, char *argv[])
 						query.execute(domain, timevalue,
 							      date, nameserver);
 
-						if (dnsperf_dumpdb) {
+						if (dnsperf_verbose) {
 							cout << "inserted " << 1
 							    << " row." << endl;
 							cout << dnsperf_hostname
@@ -327,16 +532,17 @@ int main(int argc, char *argv[])
 				ldns_rr_list_deep_free(query_results);
 				ldns_resolver_deep_free(actual_res);
 			}
-			sleep(dnsperf_freq);
+			cout << "Iteration " << ++iter << " done, sleeping for " << dnsperf_freq << "ms. " << endl;
+			usleep(dnsperf_freq * 1000);
 		}
 
-		if (dnsperf_dumpdb) {
+		if (dnsperf_verbose) {
 			mysqlpp::Query query_queries = conn.query();
 			query_queries << "select * from %6:table";
 			query_queries.parse();
 			query_queries.template_defaults["table"] =
 			    dnsperf_valtable;
-			if (dnsperf_dumpdb)
+			if (dnsperf_verbose)
 				cout << query_queries << endl;
 			mysqlpp::StoreQueryResult res_queries =
 			    query_queries.store();
@@ -373,8 +579,6 @@ ldns_resolver *build_resolver(const char *domainname,
 	ldns_rdf *domain;
 	ldns_pkt *p;
 	ldns_status s;
-	timeval t1, t2;
-	int i = 0;
 
 	p = NULL;
 	*query_results = NULL;
@@ -421,7 +625,6 @@ unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res)
 	ldns_rdf *domaintoq;
 	ldns_pkt *p;
 	ldns_rr_list *query_results;
-	ldns_status s;
 	timeval t1, t2;
 	unsigned long us1;
 
@@ -471,12 +674,12 @@ int dnsperf_stats(char *domain)
 
 	/* Connect to the database */
 	mysqlpp::Connection conn((bool) false);
-	if (dnsperf_dumpdb)
+	if (dnsperf_verbose)
 		cout << "Connecting to MYSQL://" << dnsperf_dbuser << "@" <<
 		    dnsperf_dbhostname << "/" << dnsperf_dbname << endl;
 	if (conn.connect(dnsperf_dbname, dnsperf_dbhostname, dnsperf_dbuser,
 			 dnsperf_dbpass)) {
-		
+
 		/* Check that the domain has answered at least one of our queries */
 		mysqlpp::Query query_check = conn.query();
 		query_check << "select *" <<
@@ -499,7 +702,7 @@ int dnsperf_stats(char *domain)
 		    " from " << dnsperf_valtable <<
 		    " where domain='" << domain << "';";
 
-		if (dnsperf_dumpdb)
+		if (dnsperf_verbose)
 			cout << query << endl;
 		mysqlpp::StoreQueryResult res = query.store();
 
@@ -514,12 +717,12 @@ int dnsperf_stats(char *domain)
 			count = res[0]["count(latency)"];
 			sprintf(timestamp_first, res[0]["min(timestamp)"]);
 			sprintf(timestamp_last, res[0]["max(timestamp)"]);
-			if (dnsperf_dumpdb) {
+			if (dnsperf_verbose) {
 				cout << "count: " << count << " queries, "
 				    << "Avg: " << avg / 1000.0 << " ms, "
 				    << "Stddev: " << stddev / 1000.0 << " ms, "
 				    << "first query: " << timestamp_first <<
-				    ", " << "last query: " << timestamp_first <<
+				    ", " << "last query: " << timestamp_last <<
 				    endl;
 			}
 
@@ -530,13 +733,13 @@ int dnsperf_stats(char *domain)
 			    ", stddev = " << stddev <<
 			    ", count = " << count <<
 			    ", first = '" << timestamp_first <<
-			    "', last = '" << timestamp_first <<
+			    "', last = '" << timestamp_last <<
 			    "' where domain='" << domain << "';";
 
-			if (dnsperf_dumpdb)
+			if (dnsperf_verbose)
 				cout << query << endl;
 			mysqlpp::StoreQueryResult res_stats = query.store();
-#if 0
+#if 1
 			if (res_stats) {
 				cerr << "Failed to update " << dnsperf_stattable
 				    << " table: " << query.error() << endl;
@@ -551,6 +754,7 @@ int dnsperf_stats(char *domain)
 		}
 	}
 
+	return 0;
 }
 
 int dnsperf_initdb(void)
@@ -590,88 +794,20 @@ int dnsperf_initdb(void)
 			}
 		}
 	}
-
-	try {
-		cout << "Creating " << dnsperf_valtable << " table..." << endl;
-		mysqlpp::Query query = con.query();
-		query <<
-		    "CREATE TABLE " << dnsperf_valtable << " (" <<
-		    "  domain CHAR(80) NOT NULL, " <<
-		    "  latency BIGINT NOT NULL, " <<
-		    "  timestamp DATETIME NOT NULL, " <<
-		    "  nameserver CHAR(80) NOT NULL, " <<
-		    "  notes MEDIUMTEXT NULL) " <<
-		    "ENGINE = InnoDB " <<
-		    "CHARACTER SET utf8 COLLATE utf8_general_ci";
-		query.execute();
-
-		cout << "Creating " << dnsperf_domaintable << " table..." <<
-		    endl;
-		query << "CREATE TABLE " << dnsperf_domaintable << " (" <<
-		    "  rank INT NOT NULL, " << "  domain CHAR(80) NOT NULL, " <<
-		    "  notes MEDIUMTEXT NULL) " << "ENGINE = InnoDB " <<
-		    "CHARACTER SET utf8 COLLATE utf8_general_ci";
-		query.execute();
-
-		if (dnsperf_dumpdb)
-			cout << "Populating the " << dnsperf_domaintable <<
-			    " table ..." << endl;
-		query << "insert into %6:table values " <<
-		    "(%0q, %1q, %4q:notes)";
-		query.parse();
-
-		query.template_defaults["table"] = dnsperf_domaintable;
-		query.template_defaults["notes"] = mysqlpp::null;
-
-		for (size_t i = 1; i <= DNSPERF_DOMAINS; ++i)
-			query.execute(i, default_domains[i - 1]);
-
-		if (dnsperf_dumpdb) {
-			// Test that above did what we wanted.
-			cout << "Init complete, query rows..." << endl;
-			cout << "inserted " << con.count_rows(dnsperf_valtable)
-			    << " rows." << endl;
-			cout << "inserted " <<
-			    con.count_rows(dnsperf_domaintable) << " rows." <<
-			    endl;
-		}
-		mysqlpp::Query query_stats = con.query();
-		query_stats <<
-		    "CREATE TABLE " << dnsperf_stattable << " (" <<
-		    "  domain CHAR(80) NOT NULL, " <<
-		    "  average DOUBLE NULL, " <<
-		    "  stddev DOUBLE NULL, " <<
-		    "  count BIGINT NULL, " <<
-		    "  first DATETIME NULL, " <<
-		    "  last DATETIME NULL ) " <<
-		    "ENGINE = InnoDB " <<
-		    "CHARACTER SET utf8 COLLATE utf8_general_ci";
-		query_stats.execute();
-
-		query_stats << "insert into %6:table values " <<
-		    "(%0q, %1q, %2q, %3q, %4q, %5q)";
-		query_stats.parse();
-
-		query_stats.template_defaults["table"] = dnsperf_stattable;
-
-		for (size_t i = 0; i < DNSPERF_DOMAINS; ++i)
-			query_stats.execute(default_domains[i], 0, 0, 0, 0, 0);
-		cout << (new_db ? "Created" : "Reinitialized") <<
+	cout << (new_db ? "Created" : "Reinitialized") <<
 		    " database successfully." << endl;
+
+	if (dnsperf_create_valtable(&con, dnsperf_valtable)) {
+		cout << "Unable to create table `" << dnsperf_valtable << endl;
+		exit(1);
 	}
-	catch(const mysqlpp::BadQuery & er) {
-		cerr << endl << "Query error: " << er.what() << endl;
-		return 1;
+	if (dnsperf_create_domtable(&con, dnsperf_domaintable)) {
+		cout << "Unable to create table `" << dnsperf_domaintable << endl;
+		exit(1);
 	}
-	catch(const mysqlpp::BadConversion & er) {
-		cerr << endl << "Conversion error: " << er.what() << endl <<
-		    "\tretrieved data size: " << er.retrieved <<
-		    ", actual size: " << er.actual_size << endl;
-		return 1;
-	}
-	catch(const mysqlpp::Exception & er) {
-		cerr << endl << "Error: " << er.what() << endl;
-		return 1;
+	if (dnsperf_create_stattable(&con, dnsperf_stattable)) {
+		cout << "Unable to create table `" << dnsperf_stattable<< endl;
+		exit(1);
 	}
 
 	return 0;
