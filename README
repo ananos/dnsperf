@@ -1,0 +1,135 @@
++---------+
+| DNSperf |
++---------+
+
+DNSperf: a tool to track nameserver query latency.
+
+example solution to the following challenge:
+
+=======
+Title: Tracking DNS performance to top sites
+
+Importance: Such performance numbers to top sites can be used as benchmarks
+for others to compare to.
+
+Description: Write a c++ program on Linux/BSD(Mac) that periodically sends
+DNS queries to the nameservers of the top 10 Alexa domains and stores the
+latency values in a mysql table. The frequency of queries should be
+specified by the user on command line. The program needs to make sure it
+doesnt hit the DNS cache while trying to query for a site and should use a
+random string prepended to a domain. E,g. to query foo.bar, make sure to
+prepend a random string, e.g. 1234xpto.foo.bar.
+
+Besides the timeseries values, the code needs to keep track in db stats per domain about :
+- the average query times
+- standard deviation of DNS query times
+- number of queries made so far
+- time stamp of first query made per domain and last query made
+
+Refs:
+a. Mysql lib, use mysql++:
+http://tangentsoft.net/mysql++/
+b. DNS lib, us ldns:
+http://www.nlnetlabs.nl/projects/ldns/
+=======
+
+This tool is based on ldns and mysql++-doc examples. To use, follow the instructions below:
+
+./dnsperf <options> 
+options: [-h] | [-V] | [-v] [-f <ms>] [-r] [-u <dbuser>] [-p <dbpass] 
+         [-c <dbhostname>] [-m <dbname>] [-t <logtable>] [-d <domaintable>] [-s <stattable>]
+
+  -h			  print this help and exit
+  -V			  print version and exit
+
+  -q			  supress stat output
+  -v			  verbose output
+  -f <time>		  time to wait after each loop (in ms)
+
+  Database Specific (MySQL)
+  -r			  re-initialize database (WARNING: all existing data will be lost)
+  -u <user>		  user to connect to database (default: root)
+  -p <pass>		  pass to connect to database (default: <empty>)
+  -c <hostname>		  hostname that MySQL is running (default: localhost)
+  -m <dbname>		  MySQL database name (default: dnsperf_data)
+                            if it doesn't exist, we create it, implies -r
+  -t <table>		  table name for logging queries (default: dnsperf_queries)
+  -d <table>		  table name for top level domains (default: dnsperf_domains)
+  -s <table>		  table name for stats (default: dnsperf_stattable)
+
+
++-----+
+|Notes|
++-----+
+
+We use the LDNS library to perform DNS queries. We first build a resolver using
+the host machine as a referece (meaning we use /etc/resolv.conf) to obtain all
+the nameservers that serve a specific domain. We then push each one of these
+nameservers to a resolver through which we perform the actual query of a random
+domain. Finally, we destroy the resolver and start all over again.
+
+We get latency measurements using gettimeofday. We store micro-seconds to the
+database, but print out milliseconds. 
+
+
++------------------+
+|Example execution |
++------------------+
+
+ a. Really quiet:
+   $ ./dnsperf -q
+    Starting to loop...
+    Iteration 1 done, sleeping for 1ms. 
+    ...
+
+ b. Initializing the database and sleeping for 1 second between each outer loop:
+   $ ./dnsperf -r -q -f 1000
+    Dropping existing tables...
+    Reinitialized database successfully.
+    Starting to loop...
+    Iteration 1 done, sleeping for 1000ms. 
+    Iteration 2 done, sleeping for 1000ms. 
+    Iteration 3 done, sleeping for 1000ms. 
+    ...
+
+ c. Standard execution:
+   $ ./dnsperf
+    Connecting to MYSQL://root@localhost
+    Connected, DBMS active.
+    Selecting database: `dnsperf_data`
+    Database dnsperf_data does not exist, creating it... 
+    Created database successfully.
+    Creating dnsperf_queries table...
+    Creating dnsperf_domains table...
+    Creating dnsperf_stats table...
+    Checking table:`dnsperf_queries`
+    Checking table:`dnsperf_domains`
+    Checking table:`dnsperf_stats`
+    Connecting to MYSQL://root@localhost
+    Connected.
+    Selecting database: `dnsperf_data`
+    Database selected.
+    Getting domains from table `dnsperf_domains`
+    Starting to loop...
+    domain: google.com count: 4 queries, Avg: 64.1903 ms, Stddev: 4.72151 ms, first query: 2012-06-27 13:37:41, last query: 2012-06-27 13:37:41
+    domain: facebook.com count: 3 queries, Avg: 193.43 ms, Stddev: 27.2843 ms, first query: 2012-06-27 13:37:42, last query: 2012-06-27 13:37:42
+    domain: youtube.com count: 4 queries, Avg: 63.6487 ms, Stddev: 4.41321 ms, first query: 2012-06-27 13:37:42, last query: 2012-06-27 13:37:44
+    domain: yahoo.com count: 7 queries, Avg: 270.443 ms, Stddev: 103.918 ms, first query: 2012-06-27 13:37:45, last query: 2012-06-27 13:37:47
+    domain: live.com count: 5 queries, Avg: 213.618 ms, Stddev: 113.647 ms, first query: 2012-06-27 13:37:48, last query: 2012-06-27 13:37:48
+    domain: wikipedia.org count: 3 queries, Avg: 153.696 ms, Stddev: 46.2598 ms, first query: 2012-06-27 13:37:49, last query: 2012-06-27 13:37:49
+    domain: baidu.com count: 4 queries, Avg: 548.045 ms, Stddev: 67.6431 ms, first query: 2012-06-27 13:37:50, last query: 2012-06-27 13:37:53
+    domain: blogger.com count: 4 queries, Avg: 64.4352 ms, Stddev: 4.88556 ms, first query: 2012-06-27 13:37:53, last query: 2012-06-27 13:37:53
+    domain: msn.com count: 5 queries, Avg: 213.101 ms, Stddev: 113.986 ms, first query: 2012-06-27 13:37:53, last query: 2012-06-27 13:37:54
+    domain: qq.com count: 4 queries, Avg: 444.994 ms, Stddev: 60.5154 ms, first query: 2012-06-27 13:38:05, last query: 2012-06-27 13:38:28
+    Iteration 1 done, sleeping for 1ms. 
+    domain: google.com count: 8 queries, Avg: 64.1349 ms, Stddev: 4.49113 ms, first query: 2012-06-27 13:37:41, last query: 2012-06-27 13:38:29
+    domain: facebook.com count: 6 queries, Avg: 193.607 ms, Stddev: 27.0691 ms, first query: 2012-06-27 13:37:42, last query: 2012-06-27 13:38:29
+    domain: youtube.com count: 8 queries, Avg: 64.8526 ms, Stddev: 5.40715 ms, first query: 2012-06-27 13:37:42, last query: 2012-06-27 13:38:30
+    domain: yahoo.com count: 14 queries, Avg: 271.868 ms, Stddev: 103.29 ms, first query: 2012-06-27 13:37:45, last query: 2012-06-27 13:38:36
+    domain: live.com count: 10 queries, Avg: 213.679 ms, Stddev: 113.855 ms, first query: 2012-06-27 13:37:48, last query: 2012-06-27 13:38:37
+    domain: wikipedia.org count: 6 queries, Avg: 153.197 ms, Stddev: 45.9185 ms, first query: 2012-06-27 13:37:49, last query: 2012-06-27 13:38:43
+    domain: baidu.com count: 8 queries, Avg: 539.99 ms, Stddev: 57.576 ms, first query: 2012-06-27 13:37:50, last query: 2012-06-27 13:38:46
+    domain: blogger.com count: 8 queries, Avg: 64.266 ms, Stddev: 4.63804 ms, first query: 2012-06-27 13:37:53, last query: 2012-06-27 13:38:46
+    domain: msn.com count: 10 queries, Avg: 213.279 ms, Stddev: 114.256 ms, first query: 2012-06-27 13:37:53, last query: 2012-06-27 13:38:47
+    ...
+
