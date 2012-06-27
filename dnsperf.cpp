@@ -47,7 +47,7 @@ void dnsperf_usage(const char * progname);
 void dnsperf_version(void);
 int dnsperf_sanity_check(void);
 
-unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res);
+unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res, char * date);
 ldns_resolver *build_resolver(const char *domainname,
 			      ldns_rr_list ** query_results);
 
@@ -112,12 +112,21 @@ int dnsperf_sanity_check(void)
 	if (!dnsperf_quiet)
 		cout << "Connected, DBMS active." << endl;
 
-	if (!dnsperf_quiet)
-		cout << "Selecting database: `" << dnsperf_dbname << "`" << endl;
-	if (!conn.select_db(dnsperf_dbname)) {
-		cout << "Database " << dnsperf_dbname <<
-		    " does not exist, creating it... " << endl;
-		dnsperf_initdb();
+	if (dnsperf_resetdb) {
+		/* Reset DB values */
+		if (dnsperf_initdb()) {
+			cout << "Database init failed, exiting" << endl;
+			exit(1);
+		}
+	} else {
+		if (!dnsperf_quiet)
+			cout << "Selecting database: `" << dnsperf_dbname << "`" << endl;
+
+		if (!conn.select_db(dnsperf_dbname)) {
+			cout << "Database " << dnsperf_dbname <<
+			    " does not exist, creating it... " << endl;
+			dnsperf_initdb();
+		}
 	}
 	if (conn.select_db(dnsperf_dbname)) {
 		/* What happens if the table exists but the schema is different ? ;P */
@@ -181,8 +190,6 @@ int dnsperf_do(mysqlpp::Connection * conn,
 		const char *domain = (*res_domains)[i]["domain"].c_str();
 		unsigned long nr_nameservers;
 		char date[20];
-		time_t tm;
-		struct tm *tm_local;
 
 
 		actual_res = build_resolver(domain, &query_results);
@@ -221,15 +228,11 @@ int dnsperf_do(mysqlpp::Connection * conn,
 				domain);
 
 			/* do the actual query and measure time */
-			timevalue = resolve(dnsperf_hostname, resolver);
+			timevalue = resolve(dnsperf_hostname, resolver, date);
 			if (!timevalue)
 				/* If we fail, then too bad for the domain :-) */
 				continue;
 
-			/* build the timestamp in a MySQL format */
-			tm = time(NULL);
-			tm_local = localtime(&tm);
-			strftime(date, 20, "%Y-%m-%d %X", tm_local);
 
 			ldns_rr_list_free(iplist);
 			ldns_resolver_deep_free(resolver);
@@ -295,6 +298,7 @@ int main(int argc, char *argv[])
 		exit(1);
 	}
 
+#if 0
 	if (dnsperf_resetdb) {
 		/* Reset DB values */
 		if (dnsperf_initdb()) {
@@ -302,6 +306,7 @@ int main(int argc, char *argv[])
 			exit(1);
 		}
 	}
+#endif
 
 	/* Connect to the database */
 	mysqlpp::Connection conn((bool) false);
@@ -409,13 +414,15 @@ ldns_resolver *build_resolver(const char *domainname,
 }
 
 /* Do the actual query, using a resolver */
-unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res)
+unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res, char *date)
 {
 	ldns_rdf *domaintoq;
 	ldns_pkt *p;
 	ldns_rr_list *query_results;
 	timeval t1, t2;
 	unsigned long us1;
+	time_t tm;
+	struct tm *tm_local;
 
 	p = NULL;
 	query_results = NULL;
@@ -426,11 +433,17 @@ unsigned long resolve(const char *domaintoquery, ldns_resolver * actual_res)
 		exit(EXIT_FAILURE);
 	}
 
+	tm = time(NULL);
 	gettimeofday(&t1, NULL);
 	p = ldns_resolver_query(actual_res,
 				domaintoq,
 				LDNS_RR_TYPE_A, LDNS_RR_CLASS_IN, LDNS_RD);
 	gettimeofday(&t2, NULL);
+
+	/* build the timestamp in a MySQL format */
+	tm_local = localtime(&tm);
+	strftime(date, 20, "%Y-%m-%d %X", tm_local);
+
 
 	ldns_rdf_deep_free(domaintoq);
 
@@ -470,13 +483,11 @@ int dnsperf_update_valtable(mysqlpp::Connection * conn, const char* domain, cons
 
 		query <<
 		    "insert into %6:table values "
-		    << "(%0q, %1q, %2q, %3q, %4q:notes)";
+		    << "(%0q, %1q, %2q, %3q) ";
 		query.parse();
 
 		query.template_defaults["table"]
 		    = dnsperf_valtable;
-		query.template_defaults["notes"]
-		    = mysqlpp::null;
 
 		if (dnsperf_verbose)
 			cout << "Populating " <<
@@ -644,17 +655,18 @@ int dnsperf_create_stattable(mysqlpp::Connection *conn, const char *tablename)
 	}
 	return 0;
 }
-int dnsperf_create_domtable(mysqlpp::Connection *conn, const char *tablename)
+
+int dnsperf_create_domtable(mysqlpp::Connection * conn, const char *tablename)
 {
 	try {
 		mysqlpp::Query query = conn->query();
 
 		if (!dnsperf_quiet)
-			cout << "Creating " << tablename << " table..." <<
-			    endl;
+			cout << "Creating " << tablename << " table..." << endl;
 		query << "CREATE TABLE " << tablename << " (" <<
-		    "  rank INT NOT NULL, " << "  domain CHAR(80) NOT NULL, " <<
-		    "  notes MEDIUMTEXT NULL) " << "ENGINE = InnoDB " <<
+		    "  rank INT NOT NULL, " <<
+		    "  domain CHAR(80) NOT NULL) " <<
+		    "ENGINE = InnoDB " <<
 		    "CHARACTER SET utf8 COLLATE utf8_general_ci";
 		query.execute();
 
@@ -662,11 +674,10 @@ int dnsperf_create_domtable(mysqlpp::Connection *conn, const char *tablename)
 			cout << "Populating the " << tablename <<
 			    " table ..." << endl;
 		query << "insert into %6:table values " <<
-		    "(%0q, %1q, %4q:notes)";
+		    "(%0q, %1q )";
 		query.parse();
 
 		query.template_defaults["table"] = tablename;
-		query.template_defaults["notes"] = mysqlpp::null;
 
 		for (size_t i = 1; i <= DNSPERF_DOMAINS; ++i)
 			query.execute(i, default_domains[i - 1]);
@@ -699,8 +710,7 @@ int dnsperf_create_valtable(mysqlpp::Connection *conn, const char *tablename)
 		    "  domain CHAR(80) NOT NULL, " <<
 		    "  latency BIGINT NOT NULL, " <<
 		    "  timestamp DATETIME NOT NULL, " <<
-		    "  nameserver CHAR(80) NOT NULL, " <<
-		    "  notes MEDIUMTEXT NULL) " <<
+		    "  nameserver CHAR(80) NOT NULL) " <<
 		    "ENGINE = InnoDB " <<
 		    "CHARACTER SET utf8 COLLATE utf8_general_ci";
 		query.execute();

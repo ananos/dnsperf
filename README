@@ -4,7 +4,7 @@
 
 DNSperf: a tool to track nameserver query latency.
 
-example solution to the following challenge:
+simple solution to the following challenge (in C/C++):
 
 =======
 Title: Tracking DNS performance to top sites
@@ -68,21 +68,33 @@ the nameservers that serve a specific domain. We then push each one of these
 nameservers to a resolver through which we perform the actual query of a random
 domain. Finally, we destroy the resolver and start all over again.
 
+We abuse the database a bit, keeping timestamps for every query we do. This is
+a workaround for doing as less queries as possible. We also use MySQL to
+calculate AVG, STDDEV and the timestamp of the first/last query.
+
 We get latency measurements using gettimeofday. We store micro-seconds to the
 database, but print out milliseconds. 
 
+Issues and known bugs:
+- We don't fail when we can't reach a nameserver (had several issues with
+qq.com). Instead, we just skip updating the database, so there's no noise in
+the above calculations.
+- When specifying a table via the cmdline to act (say) as the log query table,
+  if the table exists but has got a different schema, we fail :S.
+- There are some memory leaks, probably due to improper LDNS/MySQL++ handling.
+  Must investigate further.
 
 +------------------+
 |Example execution |
 +------------------+
 
- a. Really quiet:
+ a. Really quiet (silently populating the database):
    $ ./dnsperf -q
     Starting to loop...
     Iteration 1 done, sleeping for 1ms. 
     ...
 
- b. Initializing the database and sleeping for 1 second between each outer loop:
+ b. Re-initializing/creating the database and sleeping for 1 second between each outer loop:
    $ ./dnsperf -r -q -f 1000
     Dropping existing tables...
     Reinitialized database successfully.
