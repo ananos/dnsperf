@@ -201,10 +201,10 @@ int dnsperf_do(mysqlpp::Connection * conn,
 			    ldns_resolver_push_nameserver_rr_list(resolver,
 								  iplist);
 			if (!ns_name) {
-				printf("error, ns_name is null\n");
+				cout << "NS name is null\n"<< endl;
+				return 1;
 			} else {
-				char *test = ldns_rdf2str(ns_name);
-				nameserver = test;
+				nameserver = ldns_rdf2str(ns_name);
 			}
 			if (dnsperf_verbose)
 				cout << "Building random domain to query." <<
@@ -231,11 +231,13 @@ int dnsperf_do(mysqlpp::Connection * conn,
 			tm_local = localtime(&tm);
 			strftime(date, 20, "%Y-%m-%d %X", tm_local);
 
-			ldns_resolver_free(resolver);
+			ldns_rr_list_free(iplist);
+			ldns_resolver_deep_free(resolver);
 
 			/* perform the SQL query to update the table that holds query logs */
 			dnsperf_update_valtable(conn, domain, nameserver,
 						timevalue, date);
+			free(nameserver);
 		}
 
 		dnsperf_stats((char *)domain);
